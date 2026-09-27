@@ -1,0 +1,75 @@
+services:
+
+  # Docker-in-Docker service.
+  # Provides an isolated Docker daemon that Jenkins can use
+  # to build and manage container images.
+  docker:
+    image: docker:dind
+
+    # DinD requires privileged mode for its internal Docker daemon.
+    # Jenkins itself is NOT run as root/privileged.
+    privileged: true
+
+    environment:
+      # Enables TLS certificates for secure communication
+      # between Jenkins and the Docker daemon.
+      DOCKER_TLS_CERTDIR: /certs
+
+    volumes:
+      # Stores the client TLS certificates shared with Jenkins.
+      - jenkins-docker-certs:/certs/client
+
+      # Persists Docker images and build layers created by DinD.
+      - docker-data:/var/lib/docker
+
+    restart: unless-stopped
+
+
+  # Jenkins CI/CD controller.
+  # A custom image is built from the Dockerfile so Jenkins
+  # has the Docker CLI available for pipeline operations.
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    depends_on:
+      - docker
+
+    ports:
+      # Bind Jenkins only to localhost to reduce network exposure.
+      - "127.0.0.1:8080:8080"
+
+    environment:
+      # Jenkins communicates with the separate DinD service
+      # rather than the host Docker daemon.
+      DOCKER_HOST: tcp://docker:2376
+
+      # Location of the TLS client certificates.
+      DOCKER_CERT_PATH: /certs/client
+
+      # Require TLS certificate verification.
+      DOCKER_TLS_VERIFY: "1"
+
+    volumes:
+      # Persistent Jenkins configuration, jobs, plugins and logs.
+      - jenkins-data:/var/jenkins_home
+
+      # Jenkins only needs read access to the Docker TLS certificates.
+      - jenkins-docker-certs:/certs/client:ro
+
+    # Restart Jenkins automatically following VM/container interruption.
+    restart: unless-stopped
+
+
+# Named volumes preserve important CI/CD data across container recreation.
+volumes:
+
+  # Jenkins configuration, jobs and build history.
+  jenkins-data:
+
+  # TLS certificates used between Jenkins and DinD.
+  jenkins-docker-certs:
+
+  # Docker images and cached build layers produced by DinD.
+  docker-data:
